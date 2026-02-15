@@ -14,20 +14,20 @@ import { speak } from "./lib/speech";
 type Status = "idle" | "loading" | "success" | "error";
 
 export default function Page() {
-  const [mode, setMode] = useState<Mode>("onepass");
-  const [file, setFile] = useState<File | null>(null);
-  const [question, setQuestion] = useState("What is on the table?");
-  const [output, setOutput] = useState("");
-  const [liveText, setLiveText] = useState("");
+    const [mode, setMode] = useState<Mode>("onepass");
+    const [file, setFile] = useState<File | null>(null);
+    const [question, setQuestion] = useState("What is on the table?");
+    const [output, setOutput] = useState("");
+    const [liveText, setLiveText] = useState("");
 
-  const [sessionId, setSessionId] = useState("");
-  const [options, setOptions] = useState<string[]>([]);
-  const [selected, setSelected] = useState("");
-
-  const [ttsEnabled, setTtsEnabled] = useState(true);
-  const [status, setStatus] = useState<Status>("idle");
-  const [statusMsg, setStatusMsg] = useState("Ready");
-
+    const [sessionId, setSessionId] = useState("");
+    const [options, setOptions] = useState<string[]>([]);
+    const [selected, setSelected] = useState("");
+    const [videoFile, setVideoFile] = useState<File | null>(null);
+    const [ttsEnabled, setTtsEnabled] = useState(true);
+    const [status, setStatus] = useState<Status>("idle");
+    const [statusMsg, setStatusMsg] = useState("Ready");
+    const [activeMedia, setActiveMedia] = useState<"image" | "video">("image");
   function announce(text: string, doSpeak = true) {
     setLiveText(text);
     setStatusMsg(text);
@@ -48,7 +48,9 @@ export default function Page() {
         announce("Please enter a question.");
         return;
       }
-
+      
+    const isVideo = file.type.startsWith("video/");
+    setActiveMedia(isVideo ? "video" : "image");
       setStatus("loading");
       setOutput("");
       setOptions([]);
@@ -56,23 +58,45 @@ export default function Page() {
       setSessionId("");
       announce("Processing. Please wait.", false);
 
-      const form = new FormData();
-      form.append("image", file);
-      form.append("question", question);
+     const form = new FormData();
+    if (isVideo) {
+        form.append("video", file);
+    } else {
+        form.append("image", file); 
+    }
+    form.append("question", question);
 
       if (mode === "onepass") {
-        const data = await postForm<OnePassResponse>("/v1/onepass", form);
-        setOutput(data.answer);
-        setStatus("success");
-        announce("Answer ready.");
-        if (ttsEnabled) speak(data.answer);
+        if (!isVideo) {
+            const data = await postForm<OnePassResponse>("/v1/onepass", form);
+            setOutput(data.answer);
+            setStatus("success");
+            announce("Answer ready.");
+            if (ttsEnabled) speak(data.answer);
+        }else{
+            const data = await postForm<any>("/v1/video/onepass", form);
+            const text = data.answer ?? data.timeline_summary ?? JSON.stringify(data, null, 2);
+            setOutput(text);
+            setStatus("success");
+            announce("Video summary ready.");
+            if (ttsEnabled) speak(data.timeline_summary ?? "Video summary ready.");
+        }
       } else {
-        const data = await postForm<IterStartResponse>("/v1/iter/start", form);
-        setSessionId(data.session_id);
-        setOptions(data.options ?? []);
-        setOutput(`${data.inventory_brief}\n\n${data.clarification_question}`);
-        setStatus("success");
-        announce(data.clarification_question);
+        if (isVideo) {
+            const data = await postForm<any>("/v1/video/iter/start", form);
+            setSessionId(data.session_id);
+            setOptions(data.options ?? []);
+            setOutput(`${data.inventory_brief}\n\n${data.clarification_question}`);
+            setStatus("success");
+            announce(data.clarification_question);
+        }else{
+            const data = await postForm<IterStartResponse>("/v1/iter/start", form);
+            setSessionId(data.session_id);
+            setOptions(data.options ?? []);
+            setOutput(`${data.inventory_brief}\n\n${data.clarification_question}`);
+            setStatus("success");
+            announce(data.clarification_question);
+        }
       }
     } catch (e: any) {
       setStatus("error");
@@ -80,7 +104,34 @@ export default function Page() {
       setOutput(String(e?.message ?? e));
     }
   }
+  async function runVideoOnepass() {
+  try {
+    if (!videoFile) {
+      announce("Please upload a video first.");
+      return;
+    }
+    if (!question.trim()) {
+      announce("Please enter a question.");
+      return;
+    }
 
+    setStatus("loading");
+    announce("Processing video. Please wait.", false);
+
+    const form = new FormData();
+    form.append("video", videoFile);
+    form.append("question", question);
+
+    const data = await postForm<any>("/v1/video/onepass", form);
+    setOutput(data.timeline_summary ?? JSON.stringify(data, null, 2));
+    setStatus("success");
+    announce("Video summary ready.");
+  } catch (e: any) {
+    setStatus("error");
+    announce("Request failed.");
+    setOutput(String(e?.message ?? e));
+  }
+}
   async function confirmChoice() {
     try {
       if (!sessionId || !selected) {
@@ -90,6 +141,20 @@ export default function Page() {
       }
       setStatus("loading");
       announce("Getting focused description.", false);
+      if (activeMedia === "video") {
+      const form = new FormData();
+      form.append("session_id", sessionId);
+      form.append("chosen", selected);
+      const data = await postForm<any>("/v1/video/iter/choose", form);
+
+      // video choose 可能返回下一轮 options（时间->对象）
+      if (data.options && Array.isArray(data.options)) setOptions(data.options);
+      setOutput(data.focused_answer ?? "");
+      setStatus("success");
+      announce("Updated.");
+      if (ttsEnabled && data.focused_answer) speak(data.focused_answer);
+      return;
+    }
 
       const data = await postJson<IterChooseResponse>("/v1/iter/choose", {
         session_id: sessionId,

@@ -13,6 +13,7 @@ from .schemas import (
     SceneResponse,
 )
 from .utils import sha256_bytes, to_data_url
+from .video import video_iter_choose, video_iter_start, video_onepass
 
 load_dotenv()
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
@@ -31,6 +32,16 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.post("/v1/video/onepass")
+async def v1_video_onepass(
+    video: UploadFile = File(...), question: str = Form(...)
+):
+    b = await video.read()
+    return video_onepass(
+        b, question, cache_key=video.filename, filename=video.filename
+    )
 
 
 @app.post("/v1/scene", response_model=SceneResponse)
@@ -66,3 +77,21 @@ async def v1_iter_start(
 @app.post("/v1/iter/choose", response_model=IterChooseResponse)
 async def v1_iter_choose(req: IterChooseRequest):
     return iter_choose(req.session_id, req.chosen)
+
+
+@app.post("/v1/video/iter/start")
+async def v1_video_iter_start(
+    video: UploadFile = File(...), question: str = Form(...)
+):
+    b = await video.read()
+    return video_iter_start(
+        b, question, cache_key=video.filename, filename=video.filename
+    )
+
+
+@app.post("/v1/video/iter/choose")
+async def v1_video_iter_choose(
+    session_id: str = Form(...), chosen: str = Form(...)
+):
+    # 这里用 Form 是为了前端也可用 FormData，统一
+    return video_iter_choose(session_id, chosen)

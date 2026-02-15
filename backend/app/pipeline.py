@@ -38,6 +38,63 @@ sessions: dict[
 ] = {}  # {session_id: {"inventory": Inventory, "question": str, "ambiguity": Ambiguity}}
 
 
+def _normalize_location(loc: str | None) -> str:
+    if not loc:
+        return "unknown"
+    s = str(loc).strip().lower()
+
+    # common variants
+    mapping = {
+        "top-center": "top",
+        "top middle": "top",
+        "top-mid": "top",
+        "upper": "top",
+        "upper-center": "top",
+        "upper middle": "top",
+        "middle": "center",
+        "mid": "center",
+        "center-middle": "center",
+        "bottom-center": "bottom",
+        "bottom middle": "bottom",
+        "lower": "bottom",
+        "lower-center": "bottom",
+        "lower middle": "bottom",
+        "centre": "center",
+        "unknown": "unknown",
+        "n/a": "unknown",
+        "na": "unknown",
+    }
+
+    if s in mapping:
+        return mapping[s]
+
+    # accept already-valid set
+    valid = {
+        "top-left",
+        "top",
+        "top-right",
+        "left",
+        "center",
+        "right",
+        "bottom-left",
+        "bottom",
+        "bottom-right",
+        "unknown",
+    }
+    if s in valid:
+        return s
+
+    # heuristic: if contains 'top' and 'center'
+    if "top" in s and ("center" in s or "middle" in s):
+        return "top"
+    if "bottom" in s and ("center" in s or "middle" in s):
+        return "bottom"
+    if "center" in s or "middle" in s:
+        return "center"
+
+    return "unknown"
+
+
 def _extract_json(text: str) -> str:
     """Extract a JSON object from model output that may contain markdown/extra text."""
     text = (text or "").strip()
@@ -178,7 +235,11 @@ def build_inventory(
     data = _chat_with_image_json(
         INVENTORY_SYSTEM, user, image_data_url, temperature=0.1
     )
+    objs = data.get("objects", [])
+    for o in objs:
+        o["location"] = _normalize_location(o.get("location"))
 
+    data["objects"] = objs
     inv = Inventory(**data)
 
     if cache_key:
@@ -306,3 +367,26 @@ def iter_choose(session_id: str, chosen: str) -> IterChooseResponse:
         ],
         updated_state=updated,
     )
+
+
+def _chat_with_image_text(
+    system: str, user: str, image_data_url: str, temperature: float = 0.2
+) -> str:
+    resp = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": image_data_url},
+                    },
+                ],
+            },
+        ],
+        temperature=temperature,
+    )
+    return (resp.choices[0].message.content or "").strip()

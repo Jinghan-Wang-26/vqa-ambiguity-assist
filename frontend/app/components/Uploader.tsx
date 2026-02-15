@@ -22,18 +22,20 @@ export default function Uploader({
   }, [file]);
 
   const fileLabel = useMemo(() => (file ? file.name : "No file selected"), [file]);
+  const isVideo = !!file && file.type.startsWith("video/");
+  const isImage = !!file && file.type.startsWith("image/");
 
   return (
     <div className="uploader">
       <label className="label" htmlFor="img">
-        Upload an image
+        Upload an image or video
       </label>
 
       <div className="uploadRow">
         <input
           id="img"
           type="file"
-          accept="image/*"
+          accept="image/*,video/*"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           aria-describedby="upload-help"
         />
@@ -42,14 +44,24 @@ export default function Uploader({
         </span>
       </div>
 
+      <p className="hint" id="upload-help">
+        Images work with one-pass and iterative modes. Videos are supported in one-pass only.
+      </p>
+
       {previewUrl && (
         <figure className="preview">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={previewUrl}
-            alt="Preview of the uploaded image"
-            className="previewImg"
-          />
+          {isImage && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={previewUrl}
+              alt="Preview of the uploaded image"
+              className="previewImg"
+            />
+          )}
+
+          {isVideo && (
+            <video className="previewVideo" src={previewUrl} controls preload="metadata" />
+          )}
         </figure>
       )}
     </div>
